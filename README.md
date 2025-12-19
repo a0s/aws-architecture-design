@@ -28,7 +28,13 @@ The following describes the minimum requirements:
 
 ## Cloud Environment Structure
 
-AWS strongly recommends distributing resources across accounts based on isolation and security boundaries. Additionally, this is convenient for billing and “blast radius” containment. The following structure can be proposed:
+AWS strongly recommends distributing resources across accounts based on isolation and security boundaries. Additionally, this is convenient for billing and “blast radius” containment. The following structure can be proposed.
+
+<div align="center">
+  <img src="images/accounts.svg" alt="Cloud Environment Structure" style="max-width: 100%; width: 100%;">
+</div>
+
+For simplicity, we consider a flat structure without additional Organizational Units (OUs) - all accounts are managed directly within a single organization.
 
 - **Management Account** - Contains:
   - Root user (not used for daily operations)
@@ -49,7 +55,7 @@ Use explicit KMS keys for encryption across all AWS services that support it, in
 
 Key management practices:
 
-- **Key location**: KMS keys can be stored in the Management Account if it contains minimal resources (as in our case)
+- **Key location**: KMS keys can be stored in the Management Account if it contains minimal resources (as in our case). Alternatively, keys can be stored separately in each account if cross-account access is configured
 - **CloudTrail**: Enable CloudTrail for the Management Account to audit all KMS key operations
 - **Access control**: Implement two levels of access - Key administrators (manage key policies and settings) and Key users (use keys for encryption/decryption)
 - **Key policy**: Key policy takes precedence over IAM policies - configure key policies carefully as the primary access control mechanism
@@ -94,6 +100,7 @@ When using a shared domain, each account gets its own DNS subzone. This approach
 - **VPC structure**: One VPC per account - provides logical isolation and simplifies network management per environment
 - **Public subnets**: Three small `/24` subnets (256 IPs each) deployed across multiple Availability Zones. These host minimal resources such as load balancers and NAT gateways
 - **Private subnets**: Three large `/19` subnets (8,192 IPs each) deployed across Availability Zones. These host the majority of compute resources, including EKS worker nodes
+  - **IP capacity planning**: A `/19` subnet provides 8,192 IPs per AZ, which is justified for large EKS clusters with many pods, especially when using AWS VPC CNI with Prefix Delegation. However, for smaller clusters or when IP exhaustion is not a concern, smaller subnets (e.g., `/20` with 4,096 IPs or `/21` with 2,048 IPs) may be more appropriate. Consider your pod density, node count, and growth projections.
 - **Isolated subnets** (optional): Additional `/24` subnets for `database_subnets` (RDS, Aurora, and other database services), `elasticache_subnets` (ElastiCache clusters), and `intra_subnets` (internal-only resources that require no internet connectivity)
 - **Internet Gateway (IGW)**: Attached to the VPC to provide internet connectivity. Public subnets route `0.0.0.0/0` traffic to the IGW
 - **NAT Gateway**: Provides outbound internet access for private subnets. Can be deployed as a single NAT Gateway or per-AZ NAT Gateway . For non-production environments, consider using `fck-nat` as a cost-effective alternative
@@ -109,6 +116,7 @@ Network security follows the principle of least privilege and defense in depth. 
 - **Network segmentation**: Separate subnets into public and private, placing resources in private subnets whenever possible
 - **Traffic ingress**: All incoming traffic must pass through a Load Balancer with WAF enabled
 - **WAF placement**: Use WAF on Load Balancer or CloudFront - apply it as early as possible in the traffic flow to filter malicious requests before they reach your infrastructure
+- **Origin protection**: Protect origin servers from direct access bypassing WAF. Ensure ALB is not publicly accessible or restrict access via Security Groups to only allow traffic from CloudFront
 - **Traffic egress**: Outbound traffic from private subnets should only go through NAT, or be eliminated entirely if not needed. If a service doesn't need to work with external APIs, it shouldn't have internet access at all
 - **Operator access**: Access to internal resources only through jumphost or VPN
 - **IAM as single source of truth**: All operator access is managed through IAM / IAM Identity Center. Prefer temporary credentials and role assumption over static keys
@@ -126,7 +134,7 @@ Network security follows the principle of least privilege and defense in depth. 
 Use EKS as a managed control plane - no need to manage etcd/master nodes, updates and patches are handled by AWS.
 
 - **Deployment approach**: Deploy everything through Kubernetes-native resources (Deployment/StatefulSet), isolate applications and users in their own namespaces. Use separate namespaces for different applications
-- **Ingress**: Ingress is deprecated - use Gateway API alternatives instead
+- **Ingress**: Ingress is supported; Gateway API is preferred for new designs when the ecosystem is ready
 - **Traffic ingress**: ALB as the entry point into the cluster. We create it manually using IaC as opposed to the approach with AWS Load Balancer Controller and automatic LB creation. ACM certificates for HTTPS termination. Use TargetGroup (IP target mode) and TargetGroupBinding to connect to services inside the cluster
 - **Internal traffic routing**: Traffic can go directly to application services, or use Traefik as a convenient layer for managing traffic within the cluster (IngressRoute, Middleware)
 - **Configuration and secrets**: ConfigMap + Secrets (External Secrets Operator with AWS Secrets Manager/SSM)
