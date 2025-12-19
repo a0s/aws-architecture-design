@@ -43,6 +43,23 @@ AWS strongly recommends distributing resources across accounts based on isolatio
 
 If managing the lifecycle of other accounts via Terraform, the global S3 storage for Terraform state is located in the Management Account.
 
+### KMS Key Management (Optional)
+
+Use explicit KMS keys for encryption across all AWS services that support it, instead of default AWS-managed keys.
+
+Key management practices:
+
+- **Key location**: KMS keys can be stored in the Management Account if it contains minimal resources (as in our case)
+- **CloudTrail**: Enable CloudTrail for the Management Account to audit all KMS key operations
+- **Access control**: Implement two levels of access - Key administrators (manage key policies and settings) and Key users (use keys for encryption/decryption)
+- **Key policy**: Key policy takes precedence over IAM policies - configure key policies carefully as the primary access control mechanism
+- **Key scope**: One key per risk domain - create separate keys for different security boundaries (e.g., production vs staging, different applications)
+- **Key rotation**: Enable automatic key rotation for all customer-managed keys
+- **Key deletion**: Never delete KMS keys - schedule deletion only if absolutely necessary and after ensuring all encrypted data is migrated or no longer needed
+- **Monitoring**: Set up alerts for critical KMS operations: `DisableKey`, `ScheduleKeyDeletion`, and any changes to key policies
+- **Key aliases**: Add key aliases for visual convenience and easier key identification
+- **Multi-Region keys**: If there's any possibility that RDS (or other databases) will become multi-regional (e.g., read replicas, standby instances, cross-region restores), create Multi-Region KMS keys from the start
+
 ### DNS Structure
 
 When using a shared domain, each account gets its own DNS subzone. This approach provides isolation while maintaining a unified domain structure. The root DNS zone is hosted in the Shared Account, with NS records delegating subdomains to their respective accounts:
