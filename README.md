@@ -85,6 +85,10 @@ When using a shared domain, each account gets its own DNS subzone. This approach
 
 ## Network Design
 
+<div align="center">
+  <img src="images/network-minimal.svg" alt="Network Architecture" style="max-width: 100%; width: 100%;">
+</div>
+
 ### Design the Virtual Private Cloud (VPC) architecture
 
 - **VPC structure**: One VPC per account - provides logical isolation and simplifies network management per environment
