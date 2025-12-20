@@ -242,11 +242,11 @@ Container images should follow best practices for security, efficiency, and main
 
 ## CDC, Kafka, ClickHouse
 
-Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
-
 <div align="center">
   <img src="images/cdc-example.svg" alt="CDC Pipeline Example" style="max-width: 100%; width: 100%;">
 </div>
+
+Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
 
 - **ClickHouse deployment**: Choose a cloud-managed ClickHouse solution
 - **Typical pipeline**: The typical chain will look like `source-database -> Debezium connector -> Kafka -> Debezium connector -> ClickHouse`
