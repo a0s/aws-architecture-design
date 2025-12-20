@@ -8,7 +8,7 @@ This document assumes AWS as the primary cloud provider. For GCP, the architectu
 
 ## How to use this document
 
-- **What this is**: A personal “playbook” of architectural decisions and operational guardrails that tend to work well for typical web systems (SPA + API + DB) on AWS.
+- **What this is**: A personal “playbook” of architectural decisions and operational guardrails that tend to work well for typical web systems (Frontend + API + DB) on AWS.
 - **What this is not**: A strict template or a one-size-fits-all solution. Treat it as a baseline and adjust to workload, budget, latency, compliance, and team maturity.
 
 ## Application Requirements
@@ -134,12 +134,13 @@ Network security follows the principle of least privilege and defense in depth. 
 Use EKS as a managed control plane - no need to manage etcd/master nodes, updates and patches are handled by AWS.
 
 - **Deployment approach**: Deploy everything through Kubernetes-native resources (Deployment/StatefulSet), isolate applications and users in their own namespaces. Use separate namespaces for different applications
-- **Ingress**: Ingress is supported; Gateway API is preferred for new designs when the ecosystem is ready
+- **Ingress**: Ingress is dead and not recommended for new installations - use Gateway API (e.g., Traefik)
 - **Traffic ingress**: ALB as the entry point into the cluster. We create it manually using IaC as opposed to the approach with AWS Load Balancer Controller and automatic LB creation. ACM certificates for HTTPS termination. Use TargetGroup (IP target mode) and TargetGroupBinding to connect to services inside the cluster
 - **Internal traffic routing**: Traffic can go directly to application services, or use Traefik as a convenient layer for managing traffic within the cluster (IngressRoute, Middleware)
 - **Configuration and secrets**: ConfigMap + Secrets (External Secrets Operator with AWS Secrets Manager/SSM)
 - **External service access**: Use IRSA (or Pod Identity) for accessing external services
 - **Network security**: If an application doesn't use AWS SDK (e.g., direct database access via PostgreSQL protocol), use Security Groups for Pods. Optionally use NetworkPolicies
+- **VPC CNI addon**: For the VPC CNI addon, enable Prefix Delegation by setting `ENABLE_PREFIX_DELEGATION = "true"`
 - **Access control**: RBAC for internal user control
 
 ### Node Groups, Scaling, and Resource Allocation
@@ -173,11 +174,91 @@ Container images should follow best practices for security, efficiency, and main
 - **Registry**:
   - AWS ECR as the primary registry, with lifecycle policies for cleaning up old tags
   - Enable ECR vulnerability scanning
-- **Deployment process**:
-  - Rolling update (default deployment behavior) or canary/blue-green with Argo Rollouts
-  - Direct deployment (pipeline connects to cluster and updates image tag) or gitops-like strategy (pipeline generates new commit in GitOps repository which stores values.yaml for ArgoCD, ArgoCD picks up changes and updates running pods)
-  - For GitOps repository, use universal Helm templates that include all features: Deployment, Volumes, StatefulSet, Secrets, ConfigMaps, etc.
+
+### Deployment process
+
+- **Deployment strategies**:
+  - Rolling update - available in Kubernetes by default
+  - Recreate - available in Kubernetes by default
+  - Canary/blue-green - using third-party solutions, for example Argo Rollouts
+- **CI/CD integration**:
+  - Direct deployment - pipeline connects to cluster and updates image tag
+  - GitOps-like strategy - pipeline generates new commit in GitOps repository, then external mechanism (for example ArgoCD) picks up changes and performs update
+- **ArgoCD webhooks**: Don't forget to configure ArgoCD webhooks so you don't have to wait for the polling mechanism to detect changes in the GitOps repository
+- **Chart repositories**: You don't need a chart repository (like ChartMuseum or ECR OCI) - ArgoCD can pull Helm charts directly from source repositories (don't forget about security of third-party solutions)
+- **Multiple Sources feature**: Together with the "Multiple Sources" feature, this allows using a generalized chart from a third-party repository + overriding values.yaml from your own repository:
+
+  ```yaml
+  apiVersion: argoproj.io/v1alpha1
+  kind: Application
+  metadata:
+    name: server
+    namespace: ${DEV_NAMESPACE}
+  spec:
+    project: ${PROJECT_NAME}
+    sources:
+      - repoURL: '<https://github.com/nixys/nxs-universal-chart.git>'
+        path: '.'
+        targetRevision: 'v2.8.3'
+        helm:
+          valueFiles:
+            - '$values/server/dev/values.yaml'
+            - '$values/server/prod/values.yaml'
+      - repoURL: '${GITOPS_REPO}'
+        targetRevision: 'master'
+        ref: 'values'
+    destination:
+      server: '<https://kubernetes.default.svc>'
+      namespace: ${DEV_NAMESPACE}
+  ```
+
+  ```txt
+  ${GITOPS_REPO}
+  └── server
+      ├── dev
+      │   └── values.yaml
+      └── prod
+          └── values.yaml
+  ```
 
 ## Database
+
+- **Database choice**: 90% of companies and startups will be fine with PostgreSQL alone
+- **Deployment options** (in order of decreasing cost):
+  - Aurora PostgreSQL - good scalability, but some features are not supported
+  - RDS for PostgreSQL - classic Postgres suitable for everyone
+  - PostgreSQL operator in Kubernetes - for the brave
+- **High availability**: Always enable Multi-AZ for production RDS
+- **Read replicas**: Route analysts with heavy queries only to read replicas
+- **Recovery**: Aurora recovers faster from writer node failure than RDS
+- **Cross-region planning**: Create a cluster from the start if there's any possibility of needing Cross-Region Distribution in the future
+- **Network security**: Place DB in isolated subnets with no public accessibility. Access only through jumphost (most GUI database tools support SSH tunneling with private key) or VPN
+- **Backup strategy**: Centralized backup (actually copying backups) using AWS Backup to another region
+- **Connection management**: Monitor connection count. Poorly written applications often hold connections unnecessarily and open new connections for each request. Ideally, one pod should use one connection. If the number of connections is high (> 10), use PgBouncer or RDS Proxy
+- **Long transactions**: Connection proxies won't help with a large number of long-running transactions
+- **Transaction lifecycle**: Don't rely on proxies for automatic transaction management - the application itself should be responsible for opening and closing transactions
+- **DMS monitoring**: If WAL size grows during active DMS (second metric to monitor) - recreate the DMS EC2 instance
+- **Query performance**: Monitor long-running queries - someone may have forgotten to add an index
+
+## CDC, Kafka, ClickHouse
+
+Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
+
+<div align="center">
+  <img src="images/cdc-example.svg" alt="CDC Pipeline Example" style="max-width: 100%; width: 100%;">
+</div>
+
+- **ClickHouse deployment**: Choose a cloud-managed ClickHouse solution
+- **Typical pipeline**: The typical chain will look like `source-database -> Debezium connector -> Kafka -> Debezium connector -> ClickHouse`
+- **Data type issues**: The main problem you'll encounter is with date, time, datetime, and timestamp data types
+- **Integer type handling**: Some integers (for example, user UID in Telegram) will turn out to be negative int64 rather than int32
+- **Sync continuation**: Some databases won't support "sync continuation" and will start from, for example, 24 hours ago from the current point. This will fill up your Kafka queue and make you think you need to upgrade to a more expensive instance type
+- **MSK instance limitations**: Kafka MSK instances cannot be downgraded!! Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
+- **Schema mismatch handling**: The ClickHouse connector will simply stop if it sees a schema mismatch. Therefore, when changing the schema of the source database, you need to apply schemas and settings in the order of message flow, allowing old messages to reach ClickHouse
+- **Schema changes**: If the source database schema changes, you'll need to restart the connector anyway. For large tables, it makes sense to allocate a separate connector that won't be restarted frequently (and therefore won't fill up the queue)
+- **ClickHouse table engine**: Always use SharedReplacingMergeTree in ClickHouse. With the correct index selected, you can restart source data connectors as many times as needed - all duplicates will eventually be merged
+- **Soft delete**: Instead of deletion, source databases should support a soft-delete flag
+
+## Observability
 
 TODO
