@@ -252,7 +252,7 @@ Analysts and marketers often want to see information from all databases in one p
 
 - **ClickHouse deployment**: Choose a cloud-managed ClickHouse solution
 - **Typical pipeline**: The typical chain will look like `source-database -> Debezium connector -> Kafka -> Debezium connector -> ClickHouse`
-- **MSK instance limitations**: Kafka MSK instances cannot be downgraded!! Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
+- **MSK instance limitations**: Kafka MSK instances cannot be downgraded. Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
 
 ### Data Type Handling
 
@@ -298,7 +298,7 @@ Observability is critical for understanding system behavior, detecting issues, a
 - **Centralized monitoring**: Consider maintaining a separate cluster in a separate account for metrics (and logs) and centrally forwarding everything there
 - **Storage limitations**:
   - Prometheus doesn't work with EFS (because it's not fully POSIX-compatible)
-  - If using EBS, pods can only run in a single Availability Zone
+  - If using EBS, a specific EBS PV is tied to a single Availability Zone, so a pod using that PVC must be scheduled in the same AZ
   - **Thanos** as an option for long-term storage and multi-cluster aggregation
 - **Virtual filesystem**: Can store metrics on virtual filesystems, for example JuiceFS on top of S3
 - **Hybrid approach**: Can use Prometheus together with external storage (OpenObserve, VictoriaMetrics, etc.)
