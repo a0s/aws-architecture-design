@@ -242,23 +242,78 @@ Container images should follow best practices for security, efficiency, and main
 
 ## CDC, Kafka, ClickHouse
 
+Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
+
 <div align="center">
   <img src="images/cdc-example.svg" alt="CDC Pipeline Example" style="max-width: 100%; width: 100%;">
 </div>
 
-Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
+### Architecture and Deployment
 
 - **ClickHouse deployment**: Choose a cloud-managed ClickHouse solution
 - **Typical pipeline**: The typical chain will look like `source-database -> Debezium connector -> Kafka -> Debezium connector -> ClickHouse`
+- **MSK instance limitations**: Kafka MSK instances cannot be downgraded!! Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
+
+### Data Type Handling
+
 - **Data type issues**: The main problem you'll encounter is with date, time, datetime, and timestamp data types
 - **Integer type handling**: Some integers (for example, user UID in Telegram) will turn out to be negative int64 rather than int32
+
+### Synchronization and Schema Management
+
 - **Sync continuation**: Some databases won't support "sync continuation" and will start from, for example, 24 hours ago from the current point. This will fill up your Kafka queue and make you think you need to upgrade to a more expensive instance type
-- **MSK instance limitations**: Kafka MSK instances cannot be downgraded!! Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
 - **Schema mismatch handling**: The ClickHouse connector will simply stop if it sees a schema mismatch. Therefore, when changing the schema of the source database, you need to apply schemas and settings in the order of message flow, allowing old messages to reach ClickHouse
 - **Schema changes**: If the source database schema changes, you'll need to restart the connector anyway. For large tables, it makes sense to allocate a separate connector that won't be restarted frequently (and therefore won't fill up the queue)
+
+### ClickHouse Configuration
+
 - **ClickHouse table engine**: Always use SharedReplacingMergeTree in ClickHouse. With the correct index selected, you can restart source data connectors as many times as needed - all duplicates will eventually be merged
 - **Soft delete**: Instead of deletion, source databases should support a soft-delete flag
 
 ## Observability
 
-TODO
+Observability is critical for understanding system behavior, detecting issues, and ensuring reliability. The following items should be considered:
+
+### Logging
+
+- **Cost considerations**: Logging is expensive - logs are voluminous and require significant storage. You need to store tens of gigabytes of logs with fast access at any time, even though they may never be needed
+- **Solution options**:
+  - **External services**: BetterStack, DataDog, and similar managed solutions
+  - **Internal solutions**: Loki, OpenObserve, ELK stack, etc. The main cost difference comes from supported storage types (EFS, EBS, S3) and where the process runs (EC2, ECS, EKS)
+- **Log forwarding**: Use log forwarding tools such as Fluent Bit or Vector to collect and ship logs
+- **Sensitive information**: Pay attention to masking sensitive information - it's best if data is truncated/masked during forwarding, ideally at the process level before logs are sent to console
+- **Log format**: Use JSON format (preferred) or single-line logs with a fixed format. Multi-line logs where each line is recorded as a separate event in the logging system are difficult to search and analyze
+- **CloudWatch backup**: Regardless of which logging system you choose, always enable additional logging to CloudWatch Log Group as a backup
+- **Retention policies**: Configure retention policies to save costs - don't keep logs longer than necessary
+- **Account isolation**: Store logs in a separate account with separate access controls
+- **Unified systems**: Systems that store and display logs and metrics together have advantages when troubleshooting issues
+
+### Metrics
+
+- **Solution options**: Similar to logging, choose between external and internal solutions. External services are typically the same as those used for logs
+- **Internal storage options**:
+  - **Prometheus Operator**: Kubernetes-native Prometheus deployment
+  - **VictoriaMetrics Operator**: Alternative metrics storage with better compression
+- **High availability concern**: If your cluster fails with Prometheus/VictoriaMetrics operator - how will you know the state of metrics or even receive alerts?
+- **Centralized monitoring**: Consider maintaining a separate cluster in a separate account for metrics (and logs) and centrally forwarding everything there
+- **Storage limitations**:
+  - Prometheus doesn't work with EFS (because it's not fully POSIX-compatible)
+  - If using EBS, pods can only run in a single Availability Zone
+  - **Thanos** as an option for long-term storage and multi-cluster aggregation
+- **Virtual filesystem**: Can store metrics on virtual filesystems, for example JuiceFS on top of S3
+- **Hybrid approach**: Can use Prometheus together with external storage (OpenObserve, VictoriaMetrics, etc.)
+- **CloudWatch backup**: Regardless of which metrics system you choose, additionally monitor the most important metrics using native CloudWatch capabilities
+- **External monitoring**: Use an external pinger that checks server availability from outside and certificate validity
+
+### Alerting
+
+- **Alert definition**: Define clear alert conditions with appropriate thresholds (avoid alert fatigue)
+- **CloudWatch alerts**: For internal CloudWatch metrics, a reliable solution is CloudWatch Alarm -> SNS Topic -> Email
+- **Prometheus Alertmanager**: Use Alertmanager for Prometheus-based alerting
+- **PagerDuty**: Consider PagerDuty or similar services for on-call management and escalation
+
+### Dashboards
+
+- **Grafana**: Use Grafana for visualization and dashboards
+- **Dashboard management**: Store and update dashboards centrally via ConfigMap (IaC) - version control and automated deployment
+- **Alerting from Grafana**: Grafana alerts are not the best solution - prefer dedicated alerting systems (Alertmanager, CloudWatch, etc.)
