@@ -8,10 +8,36 @@ This document assumes AWS as the primary cloud provider. For GCP, the architectu
 
 ## How to use this document
 
-- **What this is**: A personal “playbook” of architectural decisions and operational guardrails that tend to work well for typical web systems (Frontend + API + DB) on AWS.
+- **What this is**: A personal "playbook" of architectural decisions and operational guardrails that tend to work well for typical web systems (Frontend + API + DB) on AWS.
 - **What this is not**: A strict template or a one-size-fits-all solution. Treat it as a baseline and adjust to workload, budget, latency, compliance, and team maturity.
 
-## Application Requirements
+## 📑 Table of Contents
+
+- [📋 Application Requirements](#-application-requirements)
+- [☁️ Cloud Environment Structure](#️-cloud-environment-structure)
+  - [🔐 KMS Key Management (Optional)](#-kms-key-management-optional)
+  - [🌐 DNS Structure](#-dns-structure)
+- [🌐 Network Design](#-network-design)
+  - [🏗️ Design the Virtual Private Cloud (VPC) architecture](#️-design-the-virtual-private-cloud-vpc-architecture)
+  - [🔒 Network Security](#-network-security)
+- [⚙️ Compute Platform](#️-compute-platform)
+  - [☸️ Kubernetes Deployment and Management](#️-kubernetes-deployment-and-management)
+  - [📈 Node Groups, Scaling, and Resource Allocation](#-node-groups-scaling-and-resource-allocation)
+  - [📦 Containerization Strategy](#-containerization-strategy)
+  - [🚀 Deployment process](#-deployment-process)
+- [🗄️ Database](#️-database)
+- [🔄 CDC, Kafka, ClickHouse](#-cdc-kafka-clickhouse)
+  - [🏛️ Architecture and Deployment](#️-architecture-and-deployment)
+  - [📊 Data Type Handling](#-data-type-handling)
+  - [🔄 Synchronization and Schema Management](#-synchronization-and-schema-management)
+  - [⚙️ ClickHouse Configuration](#️-clickhouse-configuration)
+- [📊 Observability](#-observability)
+  - [📝 Logging](#-logging)
+  - [📈 Metrics](#-metrics)
+  - [🚨 Alerting](#-alerting)
+  - [📊 Dashboards](#-dashboards)
+
+## 📋 Application Requirements
 
 This is the starting point - we want to deploy the application, right? It must meet infrastructure expectations, and your developers should understand the ground rules.
 
@@ -26,7 +52,7 @@ The following describes the minimum requirements:
 - Frontend must be ready for CDN deployment, e.g., with all static files in one folder
 - Frontend builder (webpack/vite) must use dynamic filename suffixes for proper cache invalidation. Yes, you should use a build tool and minify resources for production.
 
-## Cloud Environment Structure
+## ☁️ Cloud Environment Structure
 
 AWS strongly recommends distributing resources across accounts based on isolation and security boundaries. Additionally, this is convenient for billing and “blast radius” containment. The following structure can be proposed.
 
@@ -49,7 +75,7 @@ For simplicity, we consider a flat structure without additional Organizational U
 
 If managing the lifecycle of other accounts via Terraform, the global S3 storage for Terraform state is located in the Management Account.
 
-### KMS Key Management (Optional)
+### 🔐 KMS Key Management (Optional)
 
 Use explicit KMS keys for encryption across all AWS services that support it, instead of default AWS-managed keys.
 
@@ -66,7 +92,7 @@ Key management practices:
 - **Key aliases**: Add key aliases for visual convenience and easier key identification
 - **Multi-Region keys**: If there's any possibility that RDS (or other databases) will become multi-regional (e.g., read replicas, standby instances, cross-region restores), create Multi-Region KMS keys from the start
 
-### DNS Structure
+### 🌐 DNS Structure
 
 When using a shared domain, each account gets its own DNS subzone. This approach provides isolation while maintaining a unified domain structure. The root DNS zone is hosted in the Shared Account, with NS records delegating subdomains to their respective accounts:
 
@@ -89,13 +115,13 @@ When using a shared domain, each account gets its own DNS subzone. This approach
 - Route53 Hosted Zone: `staging.superinc.com`
 - Test infrastructure
 
-## Network Design
+## 🌐 Network Design
 
 <div align="center">
   <img src="images/network-minimal.svg" alt="Network Architecture" style="max-width: 100%; width: 100%;">
 </div>
 
-### Design the Virtual Private Cloud (VPC) architecture
+### 🏗️ Design the Virtual Private Cloud (VPC) architecture
 
 - **VPC structure**: One VPC per account - provides logical isolation and simplifies network management per environment
 - **Public subnets**: Three small `/24` subnets (256 IPs each) deployed across multiple Availability Zones. These host minimal resources such as load balancers and NAT gateways
@@ -109,7 +135,7 @@ When using a shared domain, each account gets its own DNS subzone. This approach
 - **VPC Endpoints**: Deploy VPC Endpoints (Gateway/Interface types) for commonly used AWS services to keep traffic within the AWS network and reduce NAT Gateway costs
 - **EKS networking**: Use AWS VPC CNI in Prefix Delegation mode to efficiently allocate IP addresses and reduce IP exhaustion issues in large clusters
 
-### Network Security
+### 🔒 Network Security
 
 Network security follows the principle of least privilege and defense in depth. Key practices include:
 
@@ -127,9 +153,9 @@ Network security follows the principle of least privilege and defense in depth. 
 - **Private endpoints**: Create VPC endpoints for services within your VPC to avoid traffic going to public endpoints
 - **Public access policy**: Public endpoints must be protected by WAF and TLS. Admin pages must be protected with BasicAuth or OAuth
 
-## Compute Platform
+## ⚙️ Compute Platform
 
-### Kubernetes Deployment and Management
+### ☸️ Kubernetes Deployment and Management
 
 Use EKS as a managed control plane - no need to manage etcd/master nodes, updates and patches are handled by AWS.
 
@@ -143,7 +169,7 @@ Use EKS as a managed control plane - no need to manage etcd/master nodes, update
 - **VPC CNI addon**: For the VPC CNI addon, enable Prefix Delegation by setting `ENABLE_PREFIX_DELEGATION = "true"`
 - **Access control**: RBAC for internal user control
 
-### Node Groups, Scaling, and Resource Allocation
+### 📈 Node Groups, Scaling, and Resource Allocation
 
 Use Karpenter for node scaling and management.
 
@@ -156,7 +182,7 @@ Use Karpenter for node scaling and management.
 - **Resource quotas**: Use ResourceQuota and LimitRange in namespaces to prevent teams from consuming the entire cluster
 - **Node lifecycle**: Enable gradual Karpenter consolidation/expiration
 
-### Containerization Strategy
+### 📦 Containerization Strategy
 
 Container images should follow best practices for security, efficiency, and maintainability.
 
@@ -175,7 +201,7 @@ Container images should follow best practices for security, efficiency, and main
   - AWS ECR as the primary registry, with lifecycle policies for cleaning up old tags
   - Enable ECR vulnerability scanning
 
-### Deployment process
+### 🚀 Deployment process
 
 - **Deployment strategies**:
   - Rolling update - available in Kubernetes by default
@@ -221,7 +247,7 @@ Container images should follow best practices for security, efficiency, and main
           └── values.yaml
   ```
 
-## Database
+## 🗄️ Database
 
 - **Database choice**: 90% of companies and startups will be fine with PostgreSQL alone
 - **Deployment options** (in order of decreasing cost):
@@ -240,7 +266,7 @@ Container images should follow best practices for security, efficiency, and main
 - **DMS monitoring**: If WAL size grows during active DMS (second metric to monitor) - recreate the DMS EC2 instance
 - **Query performance**: Monitor long-running queries - someone may have forgotten to add an index
 
-## CDC, Kafka, ClickHouse
+## 🔄 CDC, Kafka, ClickHouse
 
 Analysts and marketers often want to see information from all databases in one place. ClickHouse is well-suited for this purpose. Since all databases will be in different accounts, your architecture will resemble a VPC-peering spider.
 
@@ -248,33 +274,33 @@ Analysts and marketers often want to see information from all databases in one p
   <img src="images/cdc-example.svg" alt="CDC Pipeline Example" style="max-width: 100%; width: 100%;">
 </div>
 
-### Architecture and Deployment
+### 🏛️ Architecture and Deployment
 
 - **ClickHouse deployment**: Choose a cloud-managed ClickHouse solution
 - **Typical pipeline**: The typical chain will look like `source-database -> Debezium connector -> Kafka -> Debezium connector -> ClickHouse`
 - **MSK instance limitations**: Kafka MSK instances cannot be downgraded. Consider running Kafka in ECS/EKS, but you'll have to manage connectors manually
 
-### Data Type Handling
+### 📊 Data Type Handling
 
 - **Data type issues**: The main problem you'll encounter is with date, time, datetime, and timestamp data types
 - **Integer type handling**: Some integers (for example, user UID in Telegram) will turn out to be negative int64 rather than int32
 
-### Synchronization and Schema Management
+### 🔄 Synchronization and Schema Management
 
 - **Sync continuation**: Some databases won't support "sync continuation" and will start from, for example, 24 hours ago from the current point. This will fill up your Kafka queue and make you think you need to upgrade to a more expensive instance type
 - **Schema mismatch handling**: The ClickHouse connector will simply stop if it sees a schema mismatch. Therefore, when changing the schema of the source database, you need to apply schemas and settings in the order of message flow, allowing old messages to reach ClickHouse
 - **Schema changes**: If the source database schema changes, you'll need to restart the connector anyway. For large tables, it makes sense to allocate a separate connector that won't be restarted frequently (and therefore won't fill up the queue)
 
-### ClickHouse Configuration
+### ⚙️ ClickHouse Configuration
 
 - **ClickHouse table engine**: Always use SharedReplacingMergeTree in ClickHouse. With the correct index selected, you can restart source data connectors as many times as needed - all duplicates will eventually be merged
 - **Soft delete**: Instead of deletion, source databases should support a soft-delete flag
 
-## Observability
+## 📊 Observability
 
 Observability is critical for understanding system behavior, detecting issues, and ensuring reliability. The following items should be considered:
 
-### Logging
+### 📝 Logging
 
 - **Cost considerations**: Logging is expensive - logs are voluminous and require significant storage. You need to store tens of gigabytes of logs with fast access at any time, even though they may never be needed
 - **Solution options**:
@@ -288,7 +314,7 @@ Observability is critical for understanding system behavior, detecting issues, a
 - **Account isolation**: Store logs in a separate account with separate access controls
 - **Unified systems**: Systems that store and display logs and metrics together have advantages when troubleshooting issues
 
-### Metrics
+### 📈 Metrics
 
 - **Solution options**: Similar to logging, choose between external and internal solutions. External services are typically the same as those used for logs
 - **Internal storage options**:
@@ -305,14 +331,14 @@ Observability is critical for understanding system behavior, detecting issues, a
 - **CloudWatch backup**: Regardless of which metrics system you choose, additionally monitor the most important metrics using native CloudWatch capabilities
 - **External monitoring**: Use an external pinger that checks server availability from outside and certificate validity
 
-### Alerting
+### 🚨 Alerting
 
 - **Alert definition**: Define clear alert conditions with appropriate thresholds (avoid alert fatigue)
 - **CloudWatch alerts**: For internal CloudWatch metrics, a reliable solution is CloudWatch Alarm -> SNS Topic -> Email
 - **Prometheus Alertmanager**: Use Alertmanager for Prometheus-based alerting
 - **PagerDuty**: Consider PagerDuty or similar services for on-call management and escalation
 
-### Dashboards
+### 📊 Dashboards
 
 - **Grafana**: Use Grafana for visualization and dashboards
 - **Dashboard management**: Store and update dashboards centrally via ConfigMap (IaC) - version control and automated deployment
