@@ -163,7 +163,7 @@ Use EKS as a managed control plane - no need to manage etcd/master nodes, update
 - **Ingress**: Ingress is dead and not recommended for new installations - use Gateway API (e.g., Traefik)
 - **Traffic ingress**: ALB as the entry point into the cluster. We create it manually using IaC as opposed to the approach with AWS Load Balancer Controller and automatic LB creation. ACM certificates for HTTPS termination. Use TargetGroup (IP target mode) and TargetGroupBinding to connect to services inside the cluster
 - **Internal traffic routing**: Traffic can go directly to application services, or use Traefik as a convenient layer for managing traffic within the cluster (IngressRoute, Middleware)
-- **Configuration and secrets**: ConfigMap + Secrets (External Secrets Operator with AWS Secrets Manager/SSM)
+- **Configuration and secrets**: ConfigMap + Secrets (External Secrets Operator with AWS Secrets Manager/SSM). Alternative: Vault + vault-env for delivering secrets directly to process environment variables
 - **External service access**: Use IRSA (or Pod Identity) for accessing external services
 - **Network security**: If an application doesn't use AWS SDK (e.g., direct database access via PostgreSQL protocol), use Security Groups for Pods. Optionally use NetworkPolicies
 - **VPC CNI addon**: For the VPC CNI addon, enable Prefix Delegation by setting `ENABLE_PREFIX_DELEGATION = "true"`
