@@ -252,11 +252,13 @@ Container images should follow best practices for security, efficiency, and main
 - **Database choice**: 90% of companies and startups will be fine with PostgreSQL alone
 - **Deployment options** (in order of decreasing cost):
   - Aurora PostgreSQL - good scalability, but some features are not supported
-  - RDS for PostgreSQL - classic Postgres suitable for everyone
-  - PostgreSQL operator in Kubernetes - for the brave
+  - RDS for PostgreSQL Multi-AZ Cluster - provides one writer and two readers (you can run long analytical queries on readers)
+  - RDS for PostgreSQL Multi-AZ Instance - single instance with standby replica in another AZ
+  - RDS for PostgreSQL Instance - simplest and cheapest option, but no failover
+  - PostgreSQL operator in Kubernetes - for the brave, but can be a good option if you need to deploy many short-lived environments
 - **High availability**: Always enable Multi-AZ for production RDS
 - **Read replicas**: Route analysts with heavy queries only to read replicas
-- **Recovery**: Aurora recovers faster from writer node failure than RDS
+- **Recovery**: Aurora recovers faster than RDS for Postgres Multi-AZ Cluster, and Multi-AZ Cluster recovers faster than Multi-AZ Instance
 - **Cross-region planning**: Create a cluster from the start if there's any possibility of needing Cross-Region Distribution in the future
 - **Network security**: Place DB in isolated subnets with no public accessibility. Access only through jumphost (most GUI database tools support SSH tunneling with private key) or VPN
 - **Backup strategy**: Centralized backup (actually copying backups) using AWS Backup to another region
